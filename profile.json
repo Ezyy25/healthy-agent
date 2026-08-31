@@ -1,0 +1,8 @@
+{
+  "age": 25,
+  "gender": "male",
+  "weight_kg": 68,
+  "height_cm": 170,
+  "activity_level": "moderate",
+  "goal": "lose_weight"
+}
