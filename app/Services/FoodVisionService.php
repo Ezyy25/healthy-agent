@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Http\Client\Response;
 use RuntimeException;
 
 /**
@@ -12,15 +11,6 @@ use RuntimeException;
  */
 class FoodVisionService
 {
-    private string $apiKey;
-    private string $model;
-
-    public function __construct()
-    {
-        $this->apiKey = config('services.gemini.key');
-        $this->model = config('services.gemini.vision_model', 'gemini-3.6-flash');
-    }
-
     /**
      * @param string $imageBinary isi mentah file gambar (bytes)
      * @param string $mimeType    mis. 'image/jpeg', 'image/png'
@@ -28,7 +18,31 @@ class FoodVisionService
      */
     public function analyzeFoodImage(string $imageBinary, string $mimeType): array
     {
-        $prompt = <<<PROMPT
+        $prompt = $this->prompt();
+
+        try {
+            return $this->analyzeWithGemini($imageBinary, $mimeType, $prompt);
+        } catch (RuntimeException $primaryError) {
+            // Kuota/rate limit provider utama harus pindah ke provider cadangan.
+            if (!config('services.openai.key')) {
+                throw $primaryError;
+            }
+
+            try {
+                return $this->analyzeWithOpenAi($imageBinary, $mimeType, $prompt);
+            } catch (RuntimeException $fallbackError) {
+                throw new RuntimeException(
+                    'Scanner AI utama dan cadangan sedang tidak tersedia. ' .
+                    'Periksa kuota Gemini/OpenAI. Detail: ' . $fallbackError->getMessage(),
+                    previous: $fallbackError,
+                );
+            }
+        }
+    }
+
+    private function prompt(): string
+    {
+        return <<<PROMPT
         Kamu adalah asisten nutrisi. Analisis foto makanan ini dan balas HANYA
         dengan JSON valid, tanpa markdown/backtick, format persis:
         {
@@ -40,20 +54,23 @@ class FoodVisionService
           "fat_g": angka
         }
         PROMPT;
+    }
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent";
+    private function analyzeWithGemini(
+        string $imageBinary,
+        string $mimeType,
+        string $prompt,
+    ): array {
+        $apiKey = config('services.gemini.key');
+        $model = config('services.gemini.vision_model', 'gemini-2.5-flash');
+        if (!$apiKey) {
+            throw new RuntimeException('GEMINI_API_KEY belum dikonfigurasi.');
+        }
 
-        // Menerapkan retry otomatis hingga 3 kali dengan jeda bertahap (1000ms, 2000ms, dst.)
-        // jika server merespons dengan status 503 atau 429 (Rate Limit / Server Busy).
-        $response = Http::withHeaders(['x-goog-api-key' => $this->apiKey])
-            ->timeout(60)
-            ->retry(3, 1000, function ($exception, $request) {
-                if ($exception instanceof \Illuminate\Http\Client\RequestException) {
-                    $status = $exception->response->status();
-                    return $status === 503 || $status === 429;
-                }
-                return false;
-            })
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent";
+
+        $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
+            ->timeout(45)
             ->post($url, [
                 'contents' => [[
                     'parts' => [
@@ -72,12 +89,60 @@ class FoodVisionService
             ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Food vision API gagal setelah beberapa kali mencoba: ' . $response->body());
+            throw new RuntimeException('Gemini gagal (' . $response->status() . ').');
         }
 
         $raw = $response->json();
         $text = $raw['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
-        $parsed = json_decode($text, true) ?? [];
+        return $this->normalizeResult($text, $raw);
+    }
+
+    private function analyzeWithOpenAi(
+        string $imageBinary,
+        string $mimeType,
+        string $prompt,
+    ): array {
+        $apiKey = config('services.openai.key');
+        $model = config('services.openai.vision_model', 'gpt-4o-mini');
+        if (!$apiKey) {
+            throw new RuntimeException('OPENAI_API_KEY belum dikonfigurasi.');
+        }
+
+        $response = Http::withToken($apiKey)
+            ->acceptJson()
+            ->timeout(45)
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => $model,
+                'response_format' => ['type' => 'json_object'],
+                'messages' => [[
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'text', 'text' => $prompt],
+                        [
+                            'type' => 'image_url',
+                            'image_url' => [
+                                'url' => 'data:' . $mimeType . ';base64,' . base64_encode($imageBinary),
+                            ],
+                        ],
+                    ],
+                ]],
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('OpenAI gagal (' . $response->status() . ').');
+        }
+
+        $raw = $response->json();
+        $text = $raw['choices'][0]['message']['content'] ?? '{}';
+        return $this->normalizeResult($text, $raw);
+    }
+
+    private function normalizeResult(string $text, array $raw): array
+    {
+        $parsed = json_decode(trim($text), true);
+        if (!is_array($parsed)) {
+            throw new RuntimeException('Respons AI bukan JSON yang valid.');
+        }
 
         return [
             'food_name' => $parsed['food_name'] ?? 'Tidak dikenali',

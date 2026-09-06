@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\FoodVisionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 class FoodScanController extends Controller
 {
@@ -25,10 +26,17 @@ class FoodScanController extends Controller
         $path = $file->store('food-scans', 'public');
         $imageUrl = Storage::disk('public')->url($path);
 
-        $result = $this->vision->analyzeFoodImage(
-            $file->get(),
-            $file->getMimeType()
-        );
+        try {
+            $result = $this->vision->analyzeFoodImage(
+                $file->get(),
+                $file->getMimeType()
+            );
+        } catch (RuntimeException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'code' => 'food_scan_providers_unavailable',
+            ], 503);
+        }
 
         $log = $request->user()->nutritionLogs()
             ->firstOrCreate(['date' => now()->toDateString()]);
