@@ -49,6 +49,7 @@ class FoodScanController extends Controller
             'protein_g' => $result['protein_g'],
             'fat_g' => $result['fat_g'],
             'portion_estimate' => $result['portion_estimate'],
+            'micronutrients' => $result['micronutrients'],
             'source_type' => 'SCAN',
             'ai_raw_response' => $result['raw'],
         ]);

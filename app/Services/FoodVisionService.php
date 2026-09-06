@@ -7,14 +7,14 @@ use RuntimeException;
 
 /**
  * Mengirim foto makanan ke Google Gemini (multimodal) untuk deteksi
- * jenis makanan, estimasi porsi, dan kandungan kalori/makronutrisi.
+ * jenis makanan, estimasi porsi, kandungan kalori/makronutrisi, dan mineral.
  */
 class FoodVisionService
 {
     /**
      * @param string $imageBinary isi mentah file gambar (bytes)
      * @param string $mimeType    mis. 'image/jpeg', 'image/png'
-     * @return array{food_name: string, calories: int, carbs_g: float, protein_g: float, fat_g: float, portion_estimate: float, raw: array}
+    * @return array{food_name: string, calories: int, carbs_g: float, protein_g: float, fat_g: float, portion_estimate: float, micronutrients: array{natrium_mg: float, kalium_mg: float, magnesium_mg: float}, raw: array}
      */
     public function analyzeFoodImage(string $imageBinary, string $mimeType): array
     {
@@ -51,8 +51,15 @@ class FoodVisionService
           "calories": angka_kkal,
           "carbs_g": angka,
           "protein_g": angka,
-          "fat_g": angka
+                    "fat_g": angka,
+                    "micronutrients": {
+                        "natrium_mg": angka,
+                        "kalium_mg": angka,
+                        "magnesium_mg": angka
+                    }
         }
+                Estimasikan mineral dalam miligram berdasarkan makanan dan ukuran porsinya.
+                Gunakan 0 bila mineral tidak bermakna. Semua field wajib dikembalikan.
         PROMPT;
     }
 
@@ -151,6 +158,11 @@ class FoodVisionService
             'carbs_g' => (float) ($parsed['carbs_g'] ?? 0),
             'protein_g' => (float) ($parsed['protein_g'] ?? 0),
             'fat_g' => (float) ($parsed['fat_g'] ?? 0),
+            'micronutrients' => [
+                'natrium_mg' => (float) ($parsed['micronutrients']['natrium_mg'] ?? 0),
+                'kalium_mg' => (float) ($parsed['micronutrients']['kalium_mg'] ?? 0),
+                'magnesium_mg' => (float) ($parsed['micronutrients']['magnesium_mg'] ?? 0),
+            ],
             'raw' => $raw,
         ];
     }
