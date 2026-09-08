@@ -5,6 +5,14 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
+class AiProviderUnavailableException extends RuntimeException
+{
+    public function __construct(string $message, public readonly int $statusCode = 503, ?\Throwable $previous = null)
+    {
+        parent::__construct($message, 0, $previous);
+    }
+}
+
 /**
  * Mengirim foto makanan ke Google Gemini (multimodal) untuk deteksi
  * jenis makanan, estimasi porsi, kandungan kalori/makronutrisi, dan mineral.
@@ -31,9 +39,15 @@ class FoodVisionService
             try {
                 return $this->analyzeWithOpenAi($imageBinary, $mimeType, $prompt);
             } catch (RuntimeException $fallbackError) {
-                throw new RuntimeException(
-                    'Scanner AI utama dan cadangan sedang tidak tersedia. ' .
-                    'Periksa kuota Gemini/OpenAI. Detail: ' . $fallbackError->getMessage(),
+                $statusCode = str_contains($fallbackError->getMessage(), '(429)')
+                    ? 429
+                    : 503;
+
+                throw new AiProviderUnavailableException(
+                    $statusCode === 429
+                        ? 'Provider AI sedang terkena rate limit. Gemini gagal sementara dan OpenAI mencapai batas kuota. Coba lagi beberapa saat lagi.'
+                        : 'Provider AI utama dan cadangan sedang tidak tersedia. Periksa konfigurasi Gemini/OpenAI.',
+                    $statusCode,
                     previous: $fallbackError,
                 );
             }
@@ -78,6 +92,8 @@ class FoodVisionService
 
         $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
             ->timeout(45)
+            ->connectTimeout(10)
+            ->retry(2, 1000, throw: false)
             ->post($url, [
                 'contents' => [[
                     'parts' => [

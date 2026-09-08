@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AiProviderUnavailableException;
 use App\Services\FoodVisionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -31,10 +32,15 @@ class FoodScanController extends Controller
                 $file->get(),
                 $file->getMimeType()
             );
-        } catch (RuntimeException $exception) {
+        } catch (AiProviderUnavailableException $exception) {
             return response()->json([
                 'message' => $exception->getMessage(),
                 'code' => 'food_scan_providers_unavailable',
+            ], $exception->statusCode);
+        } catch (RuntimeException $exception) {
+            return response()->json([
+                'message' => 'Provider AI gagal memproses gambar. Coba lagi.',
+                'code' => 'food_scan_provider_error',
             ], 503);
         }
 
