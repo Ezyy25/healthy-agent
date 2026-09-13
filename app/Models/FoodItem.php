@@ -19,12 +19,14 @@ class FoodItem extends Model
         'protein_g',
         'fat_g',
         'portion_estimate',
+        'micronutrients',
         'source_type',
         'ai_raw_response',
     ];
 
     protected $casts = [
         'ai_raw_response' => 'array',
+        'micronutrients' => 'array',
     ];
 
     public function nutritionLog(): BelongsTo

@@ -13,31 +13,39 @@ class FoodScanController extends Controller
 {
     public function __construct(private FoodVisionService $vision) {}
 
-    // POST /api/v1/food/scan  (multipart: image)
+    // POST /api/v1/food/scan  (multipart: images[] — 1 sampai 3 file)
     public function scan(Request $request)
     {
         $request->validate([
-            'image' => 'required|image|max:20480', // max 20MB
+            'images' => 'required|array|min:1|max:3',
+            'images.*' => 'image|max:20480', // tiap foto max 20MB
         ]);
 
-        $file = $request->file('image');
+        $files = $request->file('images');
 
-        // Tetap simpan gambarnya di storage untuk riwayat/tampilan di app,
-        // tapi untuk analisis AI, Gemini butuh isi file (base64), bukan URL.
-        $path = $file->store('food-scans', 'public');
-        $imageUrl = Storage::disk('public')->url($path);
+        // Simpan tiap foto ke storage (untuk riwayat/tampilan di app),
+        // sekaligus siapkan isi mentahnya (binary + mime) untuk dikirim
+        // sebagai satu paket ke AI vision supaya dianalisis bersamaan.
+        $imageUrls = [];
+        $imagesForAi = [];
+
+        foreach ($files as $file) {
+            $path = $file->store('food-scans', 'public');
+            $imageUrls[] = Storage::disk('public')->url($path);
+            $imagesForAi[] = [
+                'binary' => $file->get(),
+                'mime' => $file->getMimeType(),
+            ];
+        }
 
         try {
-            $result = $this->vision->analyzeFoodImage(
-                $file->get(),
-                $file->getMimeType()
-            );
+            $result = $this->vision->analyzeFoodImages($imagesForAi);
         } catch (AiProviderUnavailableException $exception) {
             return response()->json([
                 'message' => $exception->getMessage(),
                 'code' => 'food_scan_providers_unavailable',
             ], $exception->statusCode);
-        } catch (RuntimeException $exception) {
+        } catch (\Throwable $exception) {
             return response()->json([
                 'message' => 'Provider AI gagal memproses gambar. Coba lagi.',
                 'code' => 'food_scan_provider_error',
@@ -47,9 +55,15 @@ class FoodScanController extends Controller
         $log = $request->user()->nutritionLogs()
             ->firstOrCreate(['date' => now()->toDateString()]);
 
+        // Foto pertama dipakai sebagai thumbnail utama (kolom image_url
+        // di database cuma menampung 1 URL). Semua URL foto tetap
+        // disimpan di ai_raw_response untuk keperluan riwayat/debug.
+        $rawResponse = $result['raw'];
+        $rawResponse['scan_image_urls'] = $imageUrls;
+
         $foodItem = $log->foodItems()->create([
             'food_name' => $result['food_name'],
-            'image_url' => $imageUrl,
+            'image_url' => $imageUrls[0],
             'calories' => $result['calories'],
             'carbs_g' => $result['carbs_g'],
             'protein_g' => $result['protein_g'],
@@ -57,7 +71,7 @@ class FoodScanController extends Controller
             'portion_estimate' => $result['portion_estimate'],
             'micronutrients' => $result['micronutrients'],
             'source_type' => 'SCAN',
-            'ai_raw_response' => $result['raw'],
+            'ai_raw_response' => $rawResponse,
         ]);
 
         return response()->json($foodItem, 201);
