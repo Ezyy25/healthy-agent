@@ -72,21 +72,49 @@ class FoodVisionService
     {
         $angleNote = $imageCount > 1
             ? "Kamu menerima {$imageCount} foto dari HIDANGAN YANG SAMA, diambil dari sudut/jarak berbeda "
-                . "(mis. tampak atas, tampak samping, close-up bahan). Gunakan SEMUA foto ini bersama-sama "
-                . "untuk memperkirakan porsi dan kandungan gizi dengan lebih akurat, karena satu sudut saja "
-                . "sering menyembunyikan bahan atau meremehkan ukuran porsi. Balas dengan SATU hasil gabungan saja, "
-                . "bukan satu hasil per foto."
-            : "Kamu menerima 1 foto makanan.";
+                . "(mis. tampak atas, tampak samping, close-up bahan). Foto tambahan sering mengungkap bahan "
+                . "yang tersembunyi di 1 sudut saja (mis. isi di bawah sayur, kuah yang tidak kelihatan dari atas, "
+                . "atau porsi yang lebih besar/kecil dari kesan foto pertama). Gabungkan semua foto sebagai satu "
+                . "sumber bukti untuk SATU estimasi akhir — jangan buat hasil terpisah per foto."
+            : "Kamu menerima 1 foto makanan. Kalau ada bagian hidangan yang tertutup/tidak sepenuhnya terlihat "
+                . "(mis. isi di bawah topping, kuah di dasar mangkuk), asumsikan porsi wajar berdasarkan jenis "
+                . "hidangannya, jangan hanya menghitung yang terlihat di permukaan.";
 
         return <<<PROMPT
-        Kamu adalah asisten nutrisi. {$angleNote}
+        Kamu adalah ahli gizi berpengalaman yang biasa mengestimasi kandungan
+        nutrisi makanan dari foto untuk aplikasi pelacak kalori. {$angleNote}
 
-        Analisis foto(-foto) ini dan balas HANYA dengan JSON valid, tanpa
-        markdown/backtick, format persis:
+        Sebelum menjawab, lakukan penalaran berikut secara internal
+        (JANGAN ditulis di jawaban akhir, cukup dipakai untuk sampai ke angka
+        yang tepat):
+        1. Identifikasi SEMUA komponen di piring/mangkuk secara terpisah
+           (contoh: nasi, ayam goreng, sambal, lalapan, kerupuk) — jangan
+           lewatkan komponen kecil seperti minyak/santan/kuah/gorengan tepung
+           yang menambah kalori signifikan.
+        2. Perkirakan metode masak tiap komponen (digoreng/direbus/dikukus/
+           bersantan/dibakar) karena ini sangat mengubah kalori & lemak —
+           makanan digoreng atau bersantan jauh lebih tinggi kalori & lemak
+           dibanding direbus/dikukus untuk berat yang sama.
+        3. Perkirakan berat/porsi tiap komponen memakai referensi visual pada
+           foto (ukuran piring standar ±23-26cm, sendok makan ±15ml, kepalan
+           tangan ±100g, ukuran jari/sendok yang terlihat di foto) — bukan
+           tebakan kasar. Lebih baik porsi realistis sesuai porsi makan orang
+           Indonesia pada umumnya daripada ekstrem terlalu besar/kecil.
+        4. Jumlahkan estimasi kalori & makronutrien tiap komponen jadi total
+           satu hidangan, lalu estimasikan kandungan mineral (natrium, kalium,
+           magnesium) berdasarkan bahan-bahan yang teridentifikasi (mis.
+           makanan bersantan/berkuah/pakai kecap-garam biasanya natrium
+           tinggi; sayur/buah biasanya kalium lebih tinggi).
+        5. Cek ulang: apakah total kalori masuk akal untuk 1 porsi makan
+           (biasanya 300-900 kkal untuk makan berat, bukan di bawah 100 atau
+           di atas 1500 kecuali porsinya memang terlihat sangat besar)?
+
+        Setelah itu, balas HANYA dengan JSON valid (tanpa markdown/backtick,
+        tanpa penjelasan tambahan), format persis:
         {
-          "food_name": "nama makanan",
-          "portion_estimate": angka_gram,
-          "calories": angka_kkal,
+          "food_name": "nama hidangan (gabungkan komponen utama jika lebih dari satu, mis. 'Nasi + Ayam Goreng + Sambal')",
+          "portion_estimate": angka_gram_total,
+          "calories": angka_kkal_total,
           "carbs_g": angka,
           "protein_g": angka,
           "fat_g": angka,
@@ -96,8 +124,9 @@ class FoodVisionService
             "magnesium_mg": angka
           }
         }
-        Estimasikan mineral dalam miligram berdasarkan makanan dan ukuran porsinya.
-        Gunakan 0 bila mineral tidak bermakna. Semua field wajib dikembalikan.
+        Semua angka numerik (bukan string), tanpa satuan di dalam nilainya.
+        Gunakan 0 hanya bila nilainya benar-benar tidak bermakna, bukan
+        karena tidak yakin. Semua field wajib dikembalikan.
         PROMPT;
     }
 
