@@ -31,4 +31,25 @@ class NutritionLogController extends Controller
 
         return response()->json($log->fresh());
     }
+
+        public function range(Request $request)
+{
+    $days = (int) $request->query('days', 30);
+    $days = in_array($days, [7, 30, 90], true) ? $days : 30;
+ 
+    $startDate = now()->subDays($days - 1)->toDateString();
+ 
+    $logs = $request->user()->nutritionLogs()
+        ->with('foodItems')
+        ->where('date', '>=', $startDate)
+        ->orderBy('date')
+        ->get();
+ 
+    return response()->json([
+        'days' => $days,
+        'logs' => $logs,
+    ]);
+}
+ 
+
 }

@@ -31,6 +31,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Nutrition log harian
         Route::get('/nutrition-logs', [NutritionLogController::class, 'show']);
         Route::post('/nutrition-logs/water', [NutritionLogController::class, 'addWater']);
+        Route::get('/nutrition-logs/range', [NutritionLogController::class, 'range']);
+ 
 
         // Scan foto makanan (AI Vision)
         Route::post('/food/scan', [FoodScanController::class, 'scan']);
